@@ -26,13 +26,12 @@ jobs:
         with:
           node-version: '18'
           cache: 'npm'
-          cache-dependency-path: typing-jung-app/package-lock.json
 
       - name: Install dependencies
-        run: cd typing-jung-app && npm ci
+        run: npm ci
 
       - name: Build
-        run: cd typing-jung-app && GITHUB_PAGES=true npm run build
+        run: GITHUB_PAGES=true npm run build
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -40,7 +39,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./typing-jung-app/dist
+          path: ./dist
 
   deploy:
     environment:
