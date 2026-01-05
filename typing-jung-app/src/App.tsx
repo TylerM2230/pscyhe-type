@@ -26,8 +26,8 @@ function App() {
   // Auto-load next quote in zen mode when quote is completed
   useEffect(() => {
     if (zenMode && completed) {
-      const timer = setTimeout(() => {
-        const newQuote = getFilteredQuote();
+      const timer = setTimeout(async () => {
+        const newQuote = await getFilteredQuote();
         startTyping(newQuote);
       }, 1500);
       return () => clearTimeout(timer);
@@ -41,8 +41,8 @@ function App() {
     }
   });
 
-  useKeyPress('Tab', () => {
-    const newQuote = getFilteredQuote();
+  useKeyPress('Tab', async () => {
+    const newQuote = await getFilteredQuote();
     startTyping(newQuote);
   });
 

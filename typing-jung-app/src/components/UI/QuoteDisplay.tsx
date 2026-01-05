@@ -22,7 +22,7 @@ const QuoteDisplay: React.FC = () => {
     bestAccuracy,
   } = useStatsStore();
 
-  const handleNextQuote = () => {
+  const handleNextQuote = async () => {
     // Save session if completed
     if (completed && currentQuote) {
       recordQuoteCompletion({
@@ -33,8 +33,8 @@ const QuoteDisplay: React.FC = () => {
       });
     }
 
-    // Load new quote
-    const newQuote = getFilteredQuote(
+    // Load new quote (async - lazy loads extracted quotes)
+    const newQuote = await getFilteredQuote(
       settings.preferredCategories.length > 0 ? settings.preferredCategories : undefined,
       settings.difficulty
     );

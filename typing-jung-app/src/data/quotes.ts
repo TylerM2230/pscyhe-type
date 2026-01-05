@@ -1,12 +1,44 @@
-import type { Quote, QuoteCategory } from '../types';
-import extractedQuotes from './extracted-quotes.json';
+import type { Quote, QuoteCategory, DifficultyLevel } from '../types';
 
 /**
  * Curated collection of Carl Jung quotes from his Collected Works
  * Organized by category and difficulty for optimal typing practice
  *
- * Note: Now includes both manually curated quotes and automatically extracted passages
+ * Note: Manual quotes load immediately, extracted quotes lazy-load on demand
  */
+
+// Lazy-loaded extracted quotes cache
+let extractedQuotesCache: Quote[] | null = null;
+let extractedQuotesPromise: Promise<Quote[]> | null = null;
+
+/**
+ * Lazy load extracted quotes (3,000 quotes, ~1.4MB)
+ * Only fetches once, then caches in memory
+ */
+async function loadExtractedQuotes(): Promise<Quote[]> {
+  if (extractedQuotesCache) {
+    return extractedQuotesCache;
+  }
+
+  if (extractedQuotesPromise) {
+    return extractedQuotesPromise;
+  }
+
+  extractedQuotesPromise = import('./extracted-quotes.json')
+    .then((module) => {
+      extractedQuotesCache = module.default as Quote[];
+      extractedQuotesPromise = null;
+      console.log(`✓ Loaded ${extractedQuotesCache.length} extracted quotes`);
+      return extractedQuotesCache;
+    })
+    .catch((error) => {
+      console.error('Failed to load extracted quotes:', error);
+      extractedQuotesPromise = null;
+      return [];
+    });
+
+  return extractedQuotesPromise;
+}
 
 const manualQuotes: Quote[] = [
   // ARCHETYPES - Enhanced with language style metadata
@@ -506,15 +538,23 @@ const manualQuotes: Quote[] = [
 ];
 
 /**
- * Combined quotes array with both manual and extracted quotes
+ * Get all quotes (manual + lazy-loaded extracted quotes)
+ * Returns manual quotes immediately, triggers lazy load of extracted quotes
  */
-export const quotes: Quote[] = [
-  ...manualQuotes,
-  ...(extractedQuotes as Quote[]),
-];
+export async function getAllQuotes(): Promise<Quote[]> {
+  const extracted = await loadExtractedQuotes();
+  return [...manualQuotes, ...extracted];
+}
 
 /**
- * Get a random quote
+ * Get manual quotes only (immediate, no async)
+ * Use this for initial app load to keep bundle small
+ */
+export const quotes: Quote[] = manualQuotes;
+
+/**
+ * Get a random quote (from manual quotes only for fast initial load)
+ * @deprecated Use getFilteredQuote() instead which supports lazy-loaded quotes
  */
 export const getRandomQuote = (): Quote => {
   const randomIndex = Math.floor(Math.random() * quotes.length);
@@ -523,6 +563,7 @@ export const getRandomQuote = (): Quote => {
 
 /**
  * Get quotes filtered by category
+ * @deprecated Use getFilteredQuote() instead which supports lazy-loaded quotes
  */
 export const getQuotesByCategory = (category: QuoteCategory): Quote[] => {
   return quotes.filter((quote) => quote.category === category);
@@ -530,6 +571,7 @@ export const getQuotesByCategory = (category: QuoteCategory): Quote[] => {
 
 /**
  * Get quotes filtered by difficulty
+ * @deprecated Use getFilteredQuote() instead which supports lazy-loaded quotes
  */
 export const getQuotesByDifficulty = (difficulty: number): Quote[] => {
   return quotes.filter((quote) => quote.difficulty === difficulty);
@@ -595,12 +637,15 @@ function calculateQuoteScore(quote: Quote): number {
 
 /**
  * Get a quote matching preferences with smart selection
+ * Automatically lazy-loads extracted quotes on first call
  */
-export const getFilteredQuote = (
+export const getFilteredQuote = async (
   categories?: QuoteCategory[],
   difficulty?: number
-): Quote => {
-  let filtered = quotes;
+): Promise<Quote> => {
+  // Lazy load extracted quotes on first call
+  const allQuotes = await getAllQuotes();
+  let filtered = allQuotes;
 
   // Apply category filter
   if (categories && categories.length > 0) {
@@ -614,7 +659,7 @@ export const getFilteredQuote = (
 
   // Fallback to all quotes if no matches
   if (filtered.length === 0) {
-    filtered = quotes;
+    filtered = allQuotes;
   }
 
   // Calculate scores for all candidates
@@ -659,19 +704,166 @@ export const getFilteredQuote = (
 };
 
 /**
- * TODO: Implement comprehensive text parser
- * This function should parse the full Jung collected works text file
- * and extract meaningful passages for typing practice
+ * Keywords for categorizing quotes. The keys are the categories, and the values are arrays of keywords.
  */
-export const parseJungText = async (_textUrl: string): Promise<Quote[]> => {
-  // Future implementation:
-  // 1. Fetch the text file
-  // 2. Split into sentences/paragraphs
-  // 3. Filter for appropriate length (50-150 chars)
-  // 4. Categorize using keyword matching
-  // 5. Assign difficulty based on vocabulary complexity
-  // 6. Extract metadata (volume, page numbers)
+const categoryKeywords: Record<string, string[]> = {
+  archetypes: ['archetype', 'archetypal', 'motif', 'primordial image'],
+  shadow: ['shadow', 'darkness', 'inferior', 'dark side'],
+  consciousness: ['conscious', 'unconscious', 'awareness', 'ego'],
+  dreams: ['dream', 'dreams', 'vision', 'fantasy', 'nightmare'],
+  individuation: [
+    'individuation',
+    'differentiate',
+    'whole',
+    'wholeness',
+    'unite',
+    'integration',
+  ],
+  psyche: ['psyche', 'psychic', 'soul', 'mind'],
+  'collective-unconscious': ['collective unconscious', 'objective psyche'],
+  'anima-animus': ['anima', 'animus', 'masculine', 'feminine', 'syzygy'],
+  self: ['self', 'Self', 'center', 'mandala', 'circumference'],
+};
 
-  console.warn('parseJungText not yet implemented');
-  return [];
+/**
+ * Categorizes a quote based on keywords.
+ * @param text The text of the quote.
+ * @returns The determined category.
+ */
+function categorizeQuote(text: string): QuoteCategory {
+  const lowerText = text.toLowerCase();
+  for (const category in categoryKeywords) {
+    for (const keyword of categoryKeywords[category]) {
+      if (lowerText.includes(keyword)) {
+        return category as QuoteCategory;
+      }
+    }
+  }
+  return 'general';
+}
+
+/**
+ * Calculates the difficulty of a quote.
+ * Difficulty is based on average word length, word count, and presence of complex words.
+ * @param text The text of the quote.
+ * @returns A difficulty score from 1 to 5.
+ */
+function calculateDifficulty(text: string): DifficultyLevel {
+  const words = text.split(/\s+/);
+  const wordCount = words.length;
+  if (wordCount === 0) return 1;
+
+  const avgWordLength = text.length / wordCount;
+
+  let difficulty = 1;
+  if (avgWordLength > 5) difficulty++;
+  if (avgWordLength > 7) difficulty++;
+  if (wordCount > 20) difficulty++;
+  if (wordCount > 30) difficulty++;
+
+  // Bonus for complex words (e.g., > 10 letters)
+  const complexWords = words.filter((w) => w.length > 10).length;
+  difficulty += Math.floor(complexWords / 2);
+
+  return Math.max(1, Math.min(5, Math.round(difficulty))) as DifficultyLevel;
+}
+
+/**
+ * Determines the passage length category.
+ * @param text The text of the quote.
+ * @returns 'short', 'medium', or 'long'.
+ */
+function getPassageLength(text: string): 'short' | 'medium' | 'long' {
+  const len = text.length;
+  if (len < 100) return 'short';
+  if (len < 200) return 'medium';
+  return 'long';
+}
+
+/**
+ * Parses a raw text file of Jung's work into a structured array of quotes.
+ *
+ * This function performs the following steps:
+ * 1. Fetches the raw text from the provided URL.
+ * 2. Cleans the text by removing citation markers and extra whitespace.
+ * 3. Splits the text into individual sentences.
+ * 4. Iterates through sentences, attempting to extract metadata like volume numbers.
+ * 5. Filters sentences to a suitable length for typing practice (50-300 characters).
+ * 6. For each valid sentence, it generates a full Quote object by:
+ *    - Assigning a unique ID.
+ *    - Determining a category via keyword matching.
+ *    - Calculating a difficulty score.
+ *    - Assigning metadata like source, volume, and passage length.
+ * 7. Returns an array of `Quote` objects.
+ *
+ * @param textUrl The URL of the raw text file to parse.
+ * @returns A promise that resolves to an array of `Quote` objects.
+ */
+export const parseJungText = async (textUrl: string): Promise<Quote[]> => {
+  try {
+    const response = await fetch(textUrl);
+    if (!response.ok) {
+      console.error(`Failed to fetch text from ${textUrl}: ${response.statusText}`);
+      return [];
+    }
+    const rawText = await response.text();
+
+    // Clean text: remove bracketed numbers (citations), normalize whitespace.
+    const cleanedText = rawText
+      .replace(/\[\d+\]/g, '')
+      .replace(/(\r\n|\n|\r)/gm, ' ')
+      .replace(/\s+/g, ' ');
+
+    // Split into sentences using a regex that handles various sentence endings.
+    const sentences = cleanedText.match(/[^.!?]+[.!?]+/g) || [];
+
+    const extractedQuotes: Quote[] = [];
+    let currentVolume: number | undefined;
+    let currentSource = 'Collected Works (auto-extracted)';
+
+    sentences.forEach((sentence, index) => {
+      const trimmedSentence = sentence.trim();
+
+      // Attempt to extract volume info from context
+      const volMatch = trimmedSentence.match(/Volume (\d+)/i);
+      if (volMatch && volMatch[1]) {
+        currentVolume = parseInt(volMatch[1], 10);
+        currentSource = `Collected Works Vol. ${currentVolume}`;
+        return; // Skip this line as it's likely a header or metadata.
+      }
+
+      // Filter for appropriate length for typing practice.
+      if (trimmedSentence.length < 50 || trimmedSentence.length > 300) {
+        return;
+      }
+
+      const category = categorizeQuote(trimmedSentence);
+      const difficulty = calculateDifficulty(trimmedSentence);
+      const passageLength = getPassageLength(trimmedSentence);
+
+      extractedQuotes.push({
+        id: `ext-${index}-${new Date().getTime()}`,
+        text: trimmedSentence,
+        source: currentSource,
+        category,
+        difficulty,
+        volume: currentVolume,
+        passageLength,
+        // The following are placeholders for more advanced analysis
+        languageStyle: 'cognitive',
+        imageRichness: Math.round(difficulty / 2), // Simple heuristic
+      });
+    });
+
+    if (extractedQuotes.length > 0) {
+      console.log(`Successfully parsed and extracted ${extractedQuotes.length} new quotes.`);
+    } else {
+      console.warn('Parsing completed, but no suitable quotes were extracted.');
+    }
+
+    return extractedQuotes;
+  } catch (error) {
+    console.error('An error occurred during the parsing of the Jung text:', error);
+    return [];
+  }
 };
